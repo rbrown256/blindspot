@@ -34,17 +34,38 @@ def check_indexability(url, show_robots):
     is_hidden = False
     hidden_reasons = []
 
+    # Use a standard Browser UA to prevent WAFs/Cloudflare from auto-blocking the script with a 403
+    USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+
     # 1. Check robots.txt
     parsed_url = urllib.parse.urlparse(url)
     robots_url = f"{parsed_url.scheme}://{parsed_url.netloc}/robots.txt"
     
     rp = urllib.robotparser.RobotFileParser()
     rp.set_url(robots_url)
+    
+    robots_content = None
     try:
-        rp.read()
+        # We fetch manually instead of rp.read() to avoid Python's default User-Agent triggering a 403
+        rb_req = urllib.request.Request(robots_url, headers={'User-Agent': USER_AGENT})
+        rb_response = urllib.request.urlopen(rb_req, timeout=10)
+        robots_content = rb_response.read().decode('utf-8', errors='ignore')
+        
+        # Feed the manually fetched content into the robot parser
+        rp.parse(robots_content.splitlines())
         can_fetch = rp.can_fetch("*", url)
-    except Exception:
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            # If robots.txt itself is actively forbidden, assume it's blocked
+            can_fetch = False
+            robots_content = f"[HTTP {e.code}: Access Denied to robots.txt]"
+        else:
+            # For 404s or 500s on the robots file, standard practice allows crawling
+            can_fetch = True
+            robots_content = f"[HTTP {e.code}: robots.txt not found]"
+    except Exception as e:
         can_fetch = True
+        robots_content = f"[Error fetching robots.txt: {e}]"
         
     print(f"[*] Robots.txt allows crawling: {can_fetch}")
     if not can_fetch:
@@ -55,23 +76,14 @@ def check_indexability(url, show_robots):
     # Output robots.txt contents if the option is passed
     if show_robots:
         print(f"\n--- Contents of {robots_url} ---")
-        try:
-            rb_req = urllib.request.Request(
-                robots_url,
-                headers={'User-Agent': 'Mozilla/5.0 (compatible; IndexCheckBot/1.0)'}
-            )
-            rb_response = urllib.request.urlopen(rb_req, timeout=10)
-            rb_content = rb_response.read().decode('utf-8', errors='ignore')
-            print(rb_content.strip() if rb_content.strip() else "[File is empty]")
-        except Exception as e:
-            print(f"[Could not fetch robots.txt directly: {e}]")
+        if robots_content and robots_content.strip():
+            print(robots_content.strip())
+        else:
+            print("[File is empty]")
         print("-" * (32 + len(robots_url)) + "\n")
 
     # 2. Fetch page and check headers/status
-    req = urllib.request.Request(
-        url, 
-        headers={'User-Agent': 'Mozilla/5.0 (compatible; IndexCheckBot/1.0)'}
-    )
+    req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
     
     try:
         response = urllib.request.urlopen(req, timeout=15)
