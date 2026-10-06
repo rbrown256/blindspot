@@ -22,7 +22,7 @@ If a page is hidden, Blindspot will tell you exactly *why* it's hiding in the sh
 Just clone the repository (or download the script) and make it executable:
 
 ```bash
-git clone https://github.com/yourusername/blindspot.git
+git clone https://github.com/rbrown256/blindspot
 cd blindspot
 chmod +x blindspot.py
 ```
